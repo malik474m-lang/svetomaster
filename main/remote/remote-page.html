@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<title>Смарт-пульт</title>
+<!--
+  Страница смарт-пульта. Отдаётся самим приложением по локальной сети (main/remote/RemoteServer.js).
+  Один самодостаточный файл без сборки и внешних запросов: в зале интернета может не быть.
+  Палитра и фейдеры повторяют программу (ТЗ docs/TZ_MOBILE_REMOTE.md §9.2).
+  Шаг 1: подключение. Экраны приборов и фейдеров добавляются шагами 2-3.
+-->
+<style>
+  :root {
+    --bg: #09090b;
+    --panel: #18181b;
+    --panel-2: #1f1f23;
+    --line: #27272a;
+    --text: #ffffff;
+    --text-2: #a3a3a3;
+    --text-3: #808080;
+    --accent: #6366f1;
+    --ok: #34d399;
+    --danger: #f87171;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 15px; line-height: 1.45;
+    overscroll-behavior: none;
+  }
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px 28px; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 6px 2px 14px;
+  }
+  .brandbox { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .logo { width: 28px; height: 28px; flex: none; border-radius: 7px; display: block; }
+  .brandtext { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+  .brand { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+  .sub { font-size: 11px; color: var(--text-2); letter-spacing: .3px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 7px; background: var(--text-3); }
+  .dot.on { background: var(--ok); }
+  .dot.warn { background: #fbbf24; }
+  .dot.off { background: var(--danger); }
+  .status { font-size: 12px; color: var(--text-2); display: flex; align-items: center; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 16px; margin-bottom: 12px;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; }
+  p { margin: 0 0 10px; color: var(--text-2); font-size: 14px; }
+  p.hint { color: var(--text-3); font-size: 13px; }
+  ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }
+  li { margin-bottom: 6px; }
+  .spinner {
+    width: 34px; height: 34px; margin: 6px auto 14px; display: block;
+    border: 3px solid var(--line); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn {
+    display: block; width: 100%; padding: 14px 16px; margin-top: 10px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; font-family: inherit; cursor: pointer;
+  }
+  .btn:active { background: #26262b; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .pin-input {
+    width: 100%; margin-top: 12px; padding: 14px; text-align: center;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; font-size: 28px; font-family: var(--mono); letter-spacing: 10px;
+  }
+  .pin-input:focus { outline: none; border-color: var(--accent); }
+  .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .hidden { display: none !important; }
+  .proj { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 12px;
+    font-size: 12px; background: rgba(52,211,153,.12); color: var(--ok);
+    border: 1px solid rgba(52,211,153,.35);
+  }
+  /* ── Список приборов ── */
+  .searchbar input {
+    width: 100%; padding: 12px 14px; font-size: 15px; font-family: inherit;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  .searchbar input:focus { outline: none; border-color: var(--accent); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 12px; }
+  .chip {
+    padding: 6px 12px; border-radius: 14px; font-size: 13px; font-family: inherit;
+    background: transparent; color: var(--text-2);
+    border: 1px solid var(--line); cursor: pointer;
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .list { border-top: 1px solid var(--line); }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    width: 100%; padding: 14px 8px; text-align: left;
+    background: transparent; border: none; border-bottom: 1px solid var(--line);
+    color: var(--text); font-family: inherit; font-size: 15px; cursor: pointer;
+  }
+  .row:active { background: var(--panel); }
+  .row.on { background: rgba(99,102,241,.16); }
+  .row .nm { display: block; }
+  .row .adr { display: block; font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .lamp { font-size: 20px; line-height: 1; opacity: .25; }
+  .row.on .lamp { opacity: 1; }
+  /* Нижняя панель: Blackout обязан быть под рукой на любом экране. */
+  .bottombar { display: flex; gap: 8px; margin-top: 14px; }
+  .bb {
+    flex: 1; padding: 15px 10px; border-radius: 10px; font-size: 14px; font-family: inherit;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); cursor: pointer;
+  }
+  .bb.danger { background: rgba(248,113,113,.12); border-color: var(--danger); color: var(--danger); }
+  .bb.danger.on { background: var(--danger); color: #1a0505; font-weight: 600; }
+  /* ── Карточка прибора ── */
+  .fxhead { display: flex; align-items: center; gap: 10px; padding: 2px 0 12px; }
+  .back {
+    width: 40px; height: 40px; flex: none; border-radius: 10px; font-size: 20px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); cursor: pointer;
+  }
+  .fxname { font-size: 17px; font-weight: 600; }
+  .fxadr { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .btn.hl { margin: 0 0 14px; border-color: var(--accent); color: #c7d2fe; background: rgba(99,102,241,.14); }
+  .btn.hl.on { background: var(--accent); color: #fff; font-weight: 600; }
+  /* Лента фейдеров: вертикальные, скин программы (globals.css .fader-slider), но
+     крупнее — под палец в тёмном зале. Прокручивается вбок, как в программе. */
+  .faders {
+    display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .fader {
+    flex: none; width: 62px; display: flex; flex-direction: column; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px 6px;
+  }
+  .fader .val { font-family: var(--mono); font-size: 13px; margin-bottom: 6px; }
+  .fader .nm {
+    font-size: 10px; color: var(--text-2); margin-top: 6px; text-align: center;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fader .dmx { font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+  .fader input[type=range] {
+    -webkit-appearance: none; appearance: none; background: transparent;
+    writing-mode: vertical-lr; direction: rtl;
+    height: 190px; width: 34px; cursor: pointer;
+  }
+  .fader input[type=range]::-webkit-slider-runnable-track {
+    width: 8px; border-radius: 6px;
+    background: linear-gradient(to top, var(--ch) var(--fill, 0%), #2a2a2a var(--fill, 0%));
+  }
+  .fader input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 30px; height: 18px; border-radius: 6px; background: var(--ch);
+    border: 1px solid rgba(255,255,255,.6); box-shadow: 0 1px 3px rgba(0,0,0,.6);
+    margin-left: -11px;
+  }
+  .fader input[type=range]::-moz-range-thumb {
+    width: 30px; height: 18px; border-radius: 6px; background: var(--ch);
+    border: 1px solid rgba(255,255,255,.6);
+  }
+  .fader.held { border-color: var(--accent); }
+  /* Строка про форум: только в русской версии, внизу страницы. Ссылка ведёт
+     наружу, поэтому работает лишь при интернете на телефоне — в зале её просто
+     не нажимают, а мешать она не должна. */
+  .forumnote {
+    margin: 22px 2px 0; padding-top: 14px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--text-3); line-height: 1.5; text-align: center;
+  }
+  .forumnote a { color: var(--accent); }
+  /* ── Адресный тест ── */
+  .arow { display: flex; gap: 10px; margin-bottom: 12px; }
+  .abox { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .abox .lb { font-size: 11px; color: var(--text-2); margin-bottom: 4px; }
+  .abox .vl { font-size: 18px; font-family: var(--mono); }
+  .stepper { display: flex; align-items: center; justify-content: space-between; }
+  .stepper button {
+    width: 38px; height: 38px; border-radius: 8px; font-size: 22px; line-height: 1;
+    background: var(--panel-2); color: var(--accent); border: 1px solid var(--line); cursor: pointer;
+  }
+  .abig { text-align: center; margin: 6px 0 10px; }
+  .abig .n { font-size: 34px; font-family: var(--mono); }
+  #addrFader { width: 100%; height: 46px; }
+  .presets { display: flex; gap: 8px; margin-bottom: 12px; }
+  .presets button, .navrow button {
+    flex: 1; padding: 12px 6px; border-radius: 9px; font-size: 13px; font-family: inherit;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); cursor: pointer;
+  }
+  .navrow { display: flex; gap: 8px; margin-bottom: 12px; }
+  /* ── Быстрые контролы: цвет и позиция ── */
+  .quick { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .qblock { flex: 1 1 150px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .qtitle { font-size: 11px; color: var(--text-2); margin-bottom: 8px; }
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sw { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .sw.on { border-color: #fff; }
+  /* Квадрат наведения: палец ставит точку, координаты идут в pan/tilt сырым DMX. */
+  .pad { position: relative; width: 100%; height: 128px; background: #141417; border: 1px solid var(--line); border-radius: 8px; touch-action: none; }
+  .pad i { position: absolute; background: var(--line); }
+  .pad i.v { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .pad i.h { top: 50%; left: 0; right: 0; height: 1px; }
+  .pad b { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
+
+  /* ── Экран «Шоу»: раскладки пульта (PRO) ─────────────────────────────────
+     Плитка большая и с крупной подписью: в тёмном зале в неё попадают пальцем,
+     не глядя, а найти нужную помогает цвет подложки. */
+  .wsbar { display:flex; gap:6px; overflow-x:auto; padding:8px 10px 4px; -webkit-overflow-scrolling:touch; }
+  .wschip { flex:0 0 auto; padding:7px 13px; border-radius:999px; border:1px solid #27272a;
+            background:#18181b; color:#a3a3a3; font-size:13px; white-space:nowrap; }
+  .wschip.on { border-color:#6366f1; background:rgba(99,102,241,.18); color:#e0e7ff; }
+  .nowbar { margin:4px 10px 8px; padding:9px 12px; border-radius:12px; background:#18181b; border:1px solid #27272a; }
+  .nowbar .lb { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#6366f1; }
+  .nowbar .nm { font-size:16px; color:#fff; margin-top:2px; }
+  .nowbar .nx { font-size:12px; color:#a3a3a3; margin-top:4px; }
+  .wsgrid { display:grid; gap:8px; padding:0 10px 10px; }
+  .tile { position:relative; overflow:hidden; min-height:74px; border-radius:14px; border:1px solid #27272a;
+          background:#18181b; color:#e4e4e7; font-size:14px; line-height:1.15; padding:8px 6px;
+          display:flex; align-items:center; justify-content:center; text-align:center; word-break:break-word; }
+  .tile.empty { opacity:.35; }
+  .tile.on { border-color:#6366f1; box-shadow:0 0 0 2px rgba(99,102,241,.45) inset; color:#fff; }
+  .tile.hold::after { content:''; position:absolute; left:0; bottom:0; height:3px; width:0; background:#f87171; }
+  /* Флэш-плитка помечена уголком: оператор должен ВИДЕТЬ, что она играет только пока
+     держишь палец, — иначе тапнет и не поймёт, почему свет погас. */
+  .tile.flash { border-style:dashed; }
+  .tile.flash::before { content:'⌁'; position:absolute; top:4px; right:6px; font-size:11px; color:#fbbf24; }
+  .tile.flash.on { border-style:solid; }
+  .tile.holding::after { width:100%; transition:width .4s linear; }
+  .wsfaders { display:flex; gap:10px; overflow-x:auto; padding:10px; border-top:1px solid #27272a; }
+  .wsfader { flex:0 0 auto; width:56px; text-align:center; }
+  .wsfader .cap { font-size:10px; color:#a3a3a3; margin-top:4px; height:24px; overflow:hidden; }
+  .wslock { position:absolute; inset:0; z-index:20; background:rgba(9,9,11,.94);
+            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; }
+  .wslock p { color:#a3a3a3; font-size:14px; }
+  .wsempty { padding:36px 18px; text-align:center; color:#808080; font-size:14px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <!-- Лого «Искра» — тот же, что в шапке программы (public/logo.svg). Встроен
+         инлайном: страница обязана открываться без единого внешнего запроса. -->
+    <span class="brandbox">
+      <svg class="logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="smg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#6366f1"/>
+            <stop offset="1" stop-color="#9333ea"/>
+          </linearGradient>
+        </defs>
+        <rect width="256" height="256" rx="56" fill="url(#smg)"/>
+        <path d="M118 42 C 128 96 150 118 204 128 C 150 138 128 160 118 214 C 108 160 86 138 32 128 C 86 118 108 96 118 42 Z" fill="#fff"/>
+        <path d="M192 156 C 196 176 204 184 224 188 C 204 192 196 200 192 220 C 188 200 180 192 160 188 C 180 184 188 176 192 156 Z" fill="#fff" opacity="0.92"/>
+      </svg>
+      <span class="brandtext">
+        <span class="brand" id="brand">СветоМастер</span>
+        <span class="sub" id="brandSub">смарт-пульт</span>
+      </span>
+    </span>
+    <span class="status"><span class="dot" id="dot"></span><span id="statusText">…</span></span>
+  </div>
+
+  <!-- Подключение -->
+  <div class="card" id="screenConnecting">
+    <span class="spinner"></span>
+    <h1 id="cTitle">Подключение…</h1>
+    <p id="cText">Ищем СветоМастер в вашей сети.</p>
+  </div>
+
+  <!-- Подключено: список приборов -->
+  <div class="hidden" id="screenOnline">
+    <div class="searchbar">
+      <input id="search" type="search" autocomplete="off" placeholder="Поиск прибора…">
+    </div>
+    <div class="chips" id="chips"></div>
+    <div id="fxList" class="list"></div>
+    <p class="hint" id="emptyHint" style="text-align:center;padding:18px 8px"></p>
+    <div class="bottombar">
+      <button class="bb hidden" id="btnToShow"><span id="btnToShowLabel">Шоу</span></button>
+      <button class="bb" id="btnAddrTest"><span id="btnAddrTestLabel">Адр. тест</span></button>
+      <button class="bb" id="btnRelease"><span id="btnReleaseLabel">Отпустить всё</span></button>
+      <button class="bb danger" id="btnBlackout"><span id="btnBlackoutLabel">Blackout</span></button>
+    </div>
+  </div>
+
+  <!-- Шоу: раскладка кнопок (PRO). Появляется, только когда программа прислала
+       непустой ws.list — без дополнения PRO сюда не попасть вовсе. -->
+  <div class="hidden" id="screenShow" style="position:relative">
+    <div class="wsbar" id="wsBar"></div>
+    <div class="nowbar hidden" id="nowBar">
+      <div class="lb" id="nowLabel">Сейчас</div>
+      <div class="nm" id="nowName"></div>
+      <div class="nx" id="nextName"></div>
+    </div>
+    <div class="wsgrid" id="wsGrid"></div>
+    <div class="wsfaders hidden" id="wsFaders"></div>
+    <p class="wsempty hidden" id="wsEmpty"></p>
+    <div class="bottombar">
+      <button class="bb" id="btnToFixtures"><span id="btnToFixturesLabel">Приборы</span></button>
+      <button class="bb" id="btnLock"><span id="btnLockLabel">Замок</span></button>
+      <button class="bb danger" id="btnBlackoutShow"><span id="btnBlackoutShowLabel">Blackout</span></button>
+    </div>
+    <div class="wslock hidden" id="wsLock">
+      <h1 id="lockTitle">Экран заблокирован</h1>
+      <p id="lockText">Чтобы снять блокировку, удерживайте кнопку одну секунду.</p>
+      <button class="bb" id="btnUnlock"><span id="btnUnlockLabel">Разблокировать (удерживать)</span></button>
+    </div>
+  </div>
+
+  <!-- Карточка прибора: фейдеры каналов -->
+  <div class="hidden" id="screenFixture">
+    <div class="fxhead">
+      <button class="back" id="btnBack" aria-label="Назад">←</button>
+      <div>
+        <div class="fxname" id="fxName"></div>
+        <div class="fxadr" id="fxAdr"></div>
+      </div>
+    </div>
+    <button class="btn hl" id="btnHl"><span id="btnHlLabel">Подсветить</span></button>
+    <div class="quick" id="quick"></div>
+    <div class="faders" id="faders"></div>
+    <p class="hint" id="noChannels" style="text-align:center;padding:14px 8px"></p>
+    <div class="bottombar">
+      <button class="bb" id="btnReleaseOne"><span id="btnReleaseOneLabel">Отпустить прибор</span></button>
+      <button class="bb danger" id="btnBlackout2"><span id="btnBlackout2Label">Blackout</span></button>
+    </div>
+  </div>
+
+  <!-- Адресный тест: значение по «юниверс + адрес», прибор не нужен -->
+  <div class="hidden" id="screenAddr">
+    <div class="fxhead">
+      <button class="back" id="addrBack" aria-label="Назад">←</button>
+      <div><div class="fxname" id="addrTitle">Адресный тест</div></div>
+    </div>
+    <div class="arow">
+      <div class="abox">
+        <div class="lb" id="addrUniLabel">Юниверс</div>
+        <div class="stepper">
+          <button id="uniMinus">−</button>
+          <span class="vl" id="uniVal">1</span>
+          <button id="uniPlus">+</button>
+        </div>
+      </div>
+      <div class="abox">
+        <div class="lb" id="addrAdrLabel">Адрес</div>
+        <div class="stepper">
+          <button id="adrMinus">−</button>
+          <span class="vl" id="adrVal">1</span>
+          <button id="adrPlus">+</button>
+        </div>
+      </div>
+    </div>
+    <div class="abig"><div class="lb" id="addrValLabel">Значение</div><div class="n" id="addrValue">0</div></div>
+    <input id="addrFader" type="range" min="0" max="255" step="1" value="0">
+    <div class="presets">
+      <button id="p0">0</button><button id="p50">50%</button><button id="p100">100%</button>
+    </div>
+    <div class="navrow">
+      <button id="prevAddr">← <span id="prevLabel">пред. адрес</span></button>
+      <button id="nextAddr"><span id="nextLabel">след. адрес</span> →</button>
+    </div>
+    <p class="hint" id="addrHint" style="text-align:center"></p>
+    <div class="bottombar">
+      <button class="bb" id="addrRelease"><span id="addrReleaseLabel">Сбросить</span></button>
+      <button class="bb danger" id="btnBlackout3"><span id="btnBlackout3Label">Blackout</span></button>
+    </div>
+  </div>
+
+  <!-- Ввод PIN -->
+  <div class="card hidden" id="screenPin">
+    <h1 id="pTitle">Введите PIN</h1>
+    <p id="pText">Код показан в программе, в окне «Смарт-пульт».</p>
+    <input class="pin-input" id="pinInput" type="tel" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off">
+    <div class="err" id="pinErr"></div>
+    <button class="btn primary" id="pinBtn">Подключиться</button>
+  </div>
+
+  <!-- Нет связи -->
+  <div class="card hidden" id="screenOffline">
+    <h1 id="fTitle">Нет связи с программой</h1>
+    <p id="fText">Проверьте:</p>
+    <ul>
+      <li id="fHint1">телефон и компьютер подключены к одной Wi-Fi-сети;</li>
+      <li id="fHint2">программа СветоМастер запущена, тумблер «Смарт-пульт» включён;</li>
+      <li id="fHint3">в окне брандмауэра Windows нажато «Разрешить доступ».</li>
+    </ul>
+    <p class="hint" id="fHint4" style="margin-top:12px">Нет общей сети? Включите точку доступа на телефоне, подключите к ней компьютер и откройте окно «Смарт-пульт» заново — QR-код обновится.</p>
+    <button class="btn" id="retryBtn">Повторить</button>
+  </div>
+  <p class="forumnote hidden" id="forumNote"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Словари. Язык приходит от программы в welcome.lang; до этого — язык браузера. ──
+  var I18N = {
+    ru: {
+      show: 'Шоу', wsNone: 'Раскладок нет. Соберите их в программе на компьютере — окно «Смарт-пульт», кнопка «Настроить».',
+      wsUnnamed: 'Без названия', nowLb: 'Сейчас', nextLb: 'Далее', fMaster: 'Яркость', fLive: 'Фейдер',
+      toFixtures: 'Приборы', lock: 'Замок', lockTitle: 'Экран заблокирован', lockText: 'Чтобы снять блокировку, удерживайте кнопку одну секунду.', unlock: 'Разблокировать (удерживать)',
+      act_blackout: 'Блэкаут', act_stopAll: 'Обнулить все', act_chaseGo: 'Шаг чейза', act_playlistNext: 'Дальше', act_playlistStop: 'Стоп',
+      brand: 'Смарт-пульт', connecting: 'Подключение…', connected: 'Подключено', offline: 'Нет связи',
+      cTitle: 'Подключение…', cText: 'Ищем СветоМастер в вашей сети.',
+      oTitle: 'Пульт готов', oNext: 'Список приборов и фейдеры появятся здесь.',
+      search: 'Поиск прибора…', all: 'Все', release: 'Отпустить всё', blackout: 'Blackout',
+      noFixtures: 'В открытом проекте нет приборов. Добавьте их на компьютере — список появится здесь сам.',
+      noMatch: 'Ничего не найдено.',
+      highlight: "Подсветить", releaseOne: "Отпустить прибор", addr: "адрес",
+      noChannels: "У этого прибора не описаны каналы. Задайте их в патче на компьютере.",
+      qColor: "Цвет", qPos: "Позиция (Pan / Tilt)",
+      addrTest: "Адр. тест", addrTitle: "Адресный тест", uni: "Юниверс", adr: "Адрес", valLb: "Значение",
+      prevA: "пред. адрес", nextA: "след. адрес", reset: "Сбросить",
+      addrHint: "Работает, даже если прибор ещё не добавлен в проект. Шаг по адресу гасит предыдущий.",
+      typeNames: { 'moving-head': 'Головы', par: 'ПАРы', laser: 'Лазеры', strobe: 'Стробы', blinder: 'Блиндеры', smoke: 'Дым', effect: 'Эффекты', other: 'Прочее' },
+      pTitle: 'Введите PIN', pText: 'Код показан в программе, в окне «Смарт-пульт».', pBtn: 'Подключиться',
+      pErrBad: 'Неверный код. Проверьте PIN в программе.', pErrBlocked: 'Слишком много попыток. Подождите минуту.',
+      fTitle: 'Нет связи с программой', fText: 'Проверьте:',
+      f1: 'телефон и компьютер подключены к одной Wi-Fi-сети;',
+      f2: 'программа СветоМастер запущена, тумблер «Смарт-пульт» включён;',
+      f3: 'в окне брандмауэра Windows нажато «Разрешить доступ».',
+      f4: 'Нет общей сети? Включите точку доступа на телефоне, подключите к ней компьютер и откройте окно «Смарт-пульт» заново — QR-код обновится.',
+      retry: 'Повторить', replaced: 'Пульт открыт на другом устройстве.', kicked: 'Программа отключила это устройство.', stopped: 'Пульт выключен в программе.'
+    },
+    en: {
+      show: 'Show', wsNone: 'No layouts yet. Build them on the computer — the “Smart remote” window, “Set up” button.',
+      wsUnnamed: 'Untitled', nowLb: 'Now', nextLb: 'Next', fMaster: 'Master', fLive: 'Fader',
+      toFixtures: 'Fixtures', lock: 'Lock', lockTitle: 'Screen locked', lockText: 'Hold the button for one second to unlock.', unlock: 'Unlock (hold)',
+      act_blackout: 'Blackout', act_stopAll: 'Stop all', act_chaseGo: 'Chase step', act_playlistNext: 'Next', act_playlistStop: 'Stop',
+      brand: 'Smart remote', connecting: 'Connecting…', connected: 'Connected', offline: 'No connection',
+      cTitle: 'Connecting…', cText: 'Looking for SvetoMaster on your network.',
+      oTitle: 'Remote is ready', oNext: 'The fixture list and faders will appear here.',
+      search: 'Search fixture…', all: 'All', release: 'Release all', blackout: 'Blackout',
+      noFixtures: 'The open project has no fixtures. Add them on the computer — the list will appear here by itself.',
+      noMatch: 'Nothing found.',
+      highlight: "Highlight", releaseOne: "Release fixture", addr: "address",
+      noChannels: "This fixture has no channels described. Set them in the patch on the computer.",
+      qColor: "Colour", qPos: "Position (pan / tilt)",
+      addrTest: "Addr. test", addrTitle: "Address test", uni: "Universe", adr: "Address", valLb: "Value",
+      prevA: "prev. address", nextA: "next address", reset: "Reset",
+      addrHint: "Works even if the fixture is not in the project yet. Stepping to the next address clears the previous one.",
+      typeNames: { 'moving-head': 'Moving heads', par: 'PARs', laser: 'Lasers', strobe: 'Strobes', blinder: 'Blinders', smoke: 'Smoke', effect: 'Effects', other: 'Other' },
+      pTitle: 'Enter PIN', pText: 'The code is shown in the app, in the "Smart remote" window.', pBtn: 'Connect',
+      pErrBad: 'Wrong code. Check the PIN in the app.', pErrBlocked: 'Too many attempts. Wait a minute.',
+      fTitle: 'No connection to the app', fText: 'Check that:',
+      f1: 'the phone and the computer are on the same Wi-Fi network;',
+      f2: 'SvetoMaster is running and the "Smart remote" switch is on;',
+      f3: 'you pressed "Allow access" in the Windows firewall dialog.',
+      f4: 'No shared network? Turn on the hotspot on your phone, connect the computer to it and reopen the "Smart remote" window — the QR code will refresh.',
+      retry: 'Retry', replaced: 'The remote was opened on another device.', kicked: 'The app disconnected this device.', stopped: 'The remote was switched off in the app.'
+    },
+    de: {
+      show: 'Show', wsNone: 'Noch keine Layouts. Bauen Sie sie am Computer — Fenster „Smart-Fernbedienung“, Schaltfläche „Einrichten“.',
+      wsUnnamed: 'Ohne Namen', nowLb: 'Jetzt', nextLb: 'Weiter', fMaster: 'Helligkeit', fLive: 'Fader',
+      toFixtures: 'Geräte', lock: 'Sperre', lockTitle: 'Bildschirm gesperrt', lockText: 'Zum Entsperren die Taste eine Sekunde halten.', unlock: 'Entsperren (halten)',
+      act_blackout: 'Blackout', act_stopAll: 'Alles stoppen', act_chaseGo: 'Chase-Schritt', act_playlistNext: 'Weiter', act_playlistStop: 'Stopp',
+      brand: 'Smart-Fernbedienung', connecting: 'Verbinden…', connected: 'Verbunden', offline: 'Keine Verbindung',
+      cTitle: 'Verbinden…', cText: 'SvetoMaster wird im Netzwerk gesucht.',
+      oTitle: 'Fernbedienung bereit', oNext: 'Geräteliste und Fader erscheinen hier.',
+      search: 'Gerät suchen…', all: 'Alle', release: 'Alle freigeben', blackout: 'Blackout',
+      noFixtures: "Das geöffnete Projekt hat keine Geräte. Fügen Sie sie am Computer hinzu — die Liste erscheint hier von selbst.",
+      noMatch: "Nichts gefunden.",
+      highlight: "Hervorheben", releaseOne: "Gerät freigeben", addr: "Adresse",
+      noChannels: "Für dieses Gerät sind keine Kanäle beschrieben. Legen Sie sie im Patch am Computer fest.",
+      qColor: "Farbe", qPos: "Position (Pan / Tilt)",
+      addrTest: "Adr.-Test", addrTitle: "Adresstest", uni: "Universum", adr: "Adresse", valLb: "Wert",
+      prevA: "vorherige Adresse", nextA: "nächste Adresse", reset: "Zurücksetzen",
+      addrHint: "Funktioniert auch, wenn das Gerät noch nicht im Projekt ist. Ein Adressschritt löscht die vorherige Adresse.",
+      typeNames: {"moving-head":"Moving Heads","par":"PARs","laser":"Laser","strobe":"Stroboskope","blinder":"Blinder","smoke":"Nebel","effect":"Effekte","other":"Sonstige"},
+      pTitle: 'PIN eingeben', pText: 'Der Code steht im Programm im Fenster „Smart-Fernbedienung“.', pBtn: 'Verbinden',
+      pErrBad: 'Falscher Code. PIN im Programm prüfen.', pErrBlocked: 'Zu viele Versuche. Eine Minute warten.',
+      fTitle: 'Keine Verbindung zum Programm', fText: 'Bitte prüfen:',
+      f1: 'Telefon und Computer sind im selben WLAN;',
+      f2: 'SvetoMaster läuft und der Schalter „Smart-Fernbedienung“ ist an;',
+      f3: 'im Windows-Firewall-Dialog wurde „Zugriff zulassen“ gedrückt.',
+      f4: 'Kein gemeinsames Netz? Hotspot am Telefon einschalten, Computer damit verbinden und das Fenster „Smart-Fernbedienung“ neu öffnen — der QR-Code wird aktualisiert.',
+      retry: 'Erneut versuchen', replaced: 'Die Fernbedienung ist auf einem anderen Gerät geöffnet.', kicked: 'Das Programm hat dieses Gerät getrennt.', stopped: 'Die Fernbedienung wurde im Programm ausgeschaltet.'
+    },
+    es: {
+      show: 'Show', wsNone: 'Aún no hay disposiciones. Ármelas en el ordenador: ventana «Mando inteligente», botón «Configurar».',
+      wsUnnamed: 'Sin nombre', nowLb: 'Ahora', nextLb: 'Siguiente', fMaster: 'Brillo', fLive: 'Fader',
+      toFixtures: 'Aparatos', lock: 'Bloqueo', lockTitle: 'Pantalla bloqueada', lockText: 'Mantenga pulsado el botón un segundo para desbloquear.', unlock: 'Desbloquear (mantener)',
+      act_blackout: 'Blackout', act_stopAll: 'Parar todo', act_chaseGo: 'Paso del chase', act_playlistNext: 'Siguiente', act_playlistStop: 'Parar',
+      brand: 'Mando inteligente', connecting: 'Conectando…', connected: 'Conectado', offline: 'Sin conexión',
+      cTitle: 'Conectando…', cText: 'Buscando SvetoMaster en tu red.',
+      oTitle: 'Mando listo', oNext: 'La lista de aparatos y los faders aparecerán aquí.',
+      search: 'Buscar aparato…', all: 'Todos', release: 'Soltar todo', blackout: 'Blackout',
+      noFixtures: "El proyecto abierto no tiene aparatos. Añádelos en el ordenador: la lista aparecerá aquí sola.",
+      noMatch: "No se encontró nada.",
+      highlight: "Resaltar", releaseOne: "Soltar aparato", addr: "dirección",
+      noChannels: "Este aparato no tiene canales descritos. Defínelos en el patch del ordenador.",
+      qColor: "Color", qPos: "Posición (pan / tilt)",
+      addrTest: "Test dir.", addrTitle: "Test de dirección", uni: "Universo", adr: "Dirección", valLb: "Valor",
+      prevA: "dirección ant.", nextA: "dirección sig.", reset: "Restablecer",
+      addrHint: "Funciona aunque el aparato aún no esté en el proyecto. Pasar a la siguiente dirección apaga la anterior.",
+      typeNames: {"moving-head":"Cabezas móviles","par":"PAR","laser":"Láseres","strobe":"Estrobos","blinder":"Blinders","smoke":"Humo","effect":"Efectos","other":"Otros"},
+      pTitle: 'Introduce el PIN', pText: 'El código se muestra en el programa, en la ventana «Mando inteligente».', pBtn: 'Conectar',
+      pErrBad: 'Código incorrecto. Comprueba el PIN en el programa.', pErrBlocked: 'Demasiados intentos. Espera un minuto.',
+      fTitle: 'Sin conexión con el programa', fText: 'Comprueba que:',
+      f1: 'el teléfono y el ordenador están en la misma red Wi-Fi;',
+      f2: 'SvetoMaster está abierto y el interruptor «Mando inteligente» está activado;',
+      f3: 'has pulsado «Permitir acceso» en el cortafuegos de Windows.',
+      f4: '¿No hay red común? Activa el punto de acceso del teléfono, conecta el ordenador a él y vuelve a abrir la ventana «Mando inteligente»: el QR se actualizará.',
+      retry: 'Reintentar', replaced: 'El mando se abrió en otro dispositivo.', kicked: 'El programa desconectó este dispositivo.', stopped: 'El mando se apagó en el programa.'
+    },
+    'pt-BR': {
+      brand: 'Controle inteligente', connecting: 'Conectando…', connected: 'Conectado', offline: 'Sem conexão',
+      cTitle: 'Conectando…', cText: 'Procurando o SvetoMaster na sua rede.',
+      oTitle: 'Controle pronto', oNext: 'A lista de aparelhos e os faders aparecerão aqui.',
+      search: 'Buscar aparelho…', all: 'Todos', release: 'Soltar tudo', blackout: 'Blackout',
+      noFixtures: "O projeto aberto não tem aparelhos. Adicione-os no computador — a lista aparece aqui sozinha.",
+      noMatch: "Nada encontrado.",
+      highlight: "Destacar", releaseOne: "Soltar aparelho", addr: "endereço",
+      noChannels: "Este aparelho não tem canais descritos. Defina-os no patch do computador.",
+      qColor: "Cor", qPos: "Posição (pan / tilt)",
+      addrTest: "Teste end.", addrTitle: "Teste de endereço", uni: "Universo", adr: "Endereço", valLb: "Valor",
+      prevA: "endereço ant.", nextA: "próximo endereço", reset: "Redefinir",
+      addrHint: "Funciona mesmo se o aparelho ainda não estiver no projeto. Avançar de endereço apaga o anterior.",
+      typeNames: {"moving-head":"Moving heads","par":"PARs","laser":"Lasers","strobe":"Strobos","blinder":"Blinders","smoke":"Fumaça","effect":"Efeitos","other":"Outros"},
+      pTitle: 'Digite o PIN', pText: 'O código aparece no programa, na janela «Controle inteligente».', pBtn: 'Conectar',
+      pErrBad: 'Código incorreto. Confira o PIN no programa.', pErrBlocked: 'Muitas tentativas. Aguarde um minuto.',
+      fTitle: 'Sem conexão com o programa', fText: 'Verifique se:',
+      f1: 'o telefone e o computador estão na mesma rede Wi-Fi;',
+      f2: 'o SvetoMaster está aberto e a chave «Controle inteligente» está ligada;',
+      f3: 'você clicou em «Permitir acesso» no firewall do Windows.',
+      f4: 'Sem rede em comum? Ligue o roteador do telefone, conecte o computador a ele e abra a janela «Controle inteligente» novamente — o QR será atualizado.',
+      retry: 'Tentar de novo', replaced: 'O controle foi aberto em outro dispositivo.', kicked: 'O programa desconectou este dispositivo.', stopped: 'O controle foi desligado no programa.'
+    }
+  };
+
+  var lang = pickLang(navigator.language || 'ru');
+  function pickLang(code) {
+    if (!code) return 'ru';
+    if (/^pt/i.test(code)) return 'pt-BR';
+    var short = String(code).slice(0, 2).toLowerCase();
+    return I18N[short] ? short : (I18N[code] ? code : 'ru');
+  }
+  function T(key) { return (I18N[lang] && I18N[lang][key]) || I18N.ru[key] || ''; }
+
+  function $(id) { return document.getElementById(id); }
+
+  // ── Состояние экрана приборов ──
+  var snapshot = { fixtures: [], types: [] };
+  var filterType = '';       // '' = все типы
+  var query = '';
+  var highlightId = null;    // какой прибор сейчас «показывает себя»
+  var blackoutOn = false;
+
+  /** Короткий отклик на нажатие: в тёмном зале это единственное подтверждение,
+   *  что команда ушла, — прибор может быть далеко и его вспышку не видно. */
+  function feedback() {
+    try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = audioCtx || new Ctx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, audioCtx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.07);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.08);
+    } catch (e) { /* звук не критичен, вибрация уже сработала */ }
+  }
+  var audioCtx = null;
+
+  function typeLabel(type) {
+    var names = (I18N[lang] && I18N[lang].typeNames) || I18N.ru.typeNames || {};
+    return names[type] || type;
+  }
+
+  function visibleFixtures() {
+    var q = query.trim().toLowerCase();
+    return snapshot.fixtures.filter(function (f) {
+      if (filterType && f.type !== filterType) return false;
+      if (!q) return true;
+      return (f.name || '').toLowerCase().indexOf(q) >= 0 || String(f.address).indexOf(q) >= 0;
+    });
+  }
+
+  function renderChips() {
+    var box = $('chips');
+    box.textContent = '';
+    if (!snapshot.types.length) return;
+    var types = [''].concat(snapshot.types);
+    types.forEach(function (type) {
+      var b = document.createElement('button');
+      b.className = 'chip' + (filterType === type ? ' on' : '');
+      b.textContent = type === '' ? T('all') : typeLabel(type);
+      b.addEventListener('click', function () { filterType = type; renderList(); });
+      box.appendChild(b);
+    });
+  }
+
+  function renderList() {
+    if (!$('fxList')) return;
+    renderChips();
+    var list = $('fxList');
+    list.textContent = '';
+    var items = visibleFixtures();
+
+    var hint = $('emptyHint');
+    hint.textContent = snapshot.fixtures.length === 0 ? T('noFixtures') : (items.length === 0 ? T('noMatch') : '');
+    hint.classList.toggle('hidden', hint.textContent === '');
+
+    items.forEach(function (f) {
+      var row = document.createElement('button');
+      row.className = 'row' + (highlightId === f.id ? ' on' : '');
+      var left = document.createElement('span');
+      var nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = f.name || '—';
+      var adr = document.createElement('span');
+      adr.className = 'adr';
+      // Юниверс · адрес · сколько каналов — то же, что человек видит в патче на ПК.
+      adr.textContent = 'U' + f.universe + ' · ' + f.address + ' · ' + f.channels.length + ' ch';
+      left.appendChild(nm); left.appendChild(adr);
+      var lamp = document.createElement('span');
+      lamp.className = 'lamp';
+      lamp.textContent = '💡';
+      row.appendChild(left); row.appendChild(lamp);
+      // Тап по строке открывает карточку с фейдерами; тап по лампочке — подсветка
+      // прямо из списка (обход фермы: подсветил, увидел, пошёл дальше).
+      row.addEventListener('click', function () { openFixture(f); });
+      lamp.addEventListener('click', function (e) { e.stopPropagation(); toggleHighlight(f.id); });
+      list.appendChild(row);
+    });
+
+    $('btnBlackout').classList.toggle('on', blackoutOn);
+  }
+
+  // ── Карточка прибора ──
+  // Цвета каналов — та же карта, что в программе (ProgramMode.tsx): человек видит
+  // на телефоне ровно те же цвета фейдеров, что на компьютере.
+  var CH_COLORS = {
+    dimmer: '#a78bfa', red: '#f87171', green: '#4ade80', blue: '#60a5fa',
+    white: '#e5e7eb', amber: '#fbbf24', uv: '#c084fc', cyan: '#22d3ee',
+    magenta: '#d946ef', yellow: '#eab308',
+    pan: '#34d399', tilt: '#f472b6', strobe: '#facc15', zoom: '#38bdf8'
+  };
+  var openFx = null;          // прибор, чья карточка открыта
+  var chValues = {};          // offset → значение фейдера в этой сессии
+
+  function openFixture(f) {
+    openFx = f;
+    chValues = {};
+    $('fxName').textContent = f.name || '—';
+    $('fxAdr').textContent = 'U' + f.universe + ' · ' + T('addr') + ' ' + f.address + ' · ' + f.channels.length + ' ch';
+    $('btnHlLabel').textContent = T('highlight');
+    $('btnReleaseOneLabel').textContent = T('releaseOne');
+    $('btnBlackout2Label').textContent = T('blackout');
+    quickColor = null;
+    renderQuick();
+    renderFaders();
+    show('screenFixture');
+  }
+
+  // Быстрые контролы — НЕ отдельный механизм: роль ищется среди каналов прибора
+  // (типы приходят в снимке) и уезжает обычным ch.set. Один путь до провода, одна
+  // проверка безопасности, ничего нового в движке.
+  var SWATCHES = ['#ffffff', '#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff'];
+  var quickColor = null;
+
+  function channelOf(type) {
+    if (!openFx) return null;
+    for (var i = 0; i < openFx.channels.length; i++) {
+      if (openFx.channels[i].type === type) return openFx.channels[i].idx;
+    }
+    return null;
+  }
+
+  function setChannel(idx, val) {
+    if (idx === null) return;
+    chValues[idx] = val;
+    queueChannel(openFx.id, idx, val);
+  }
+
+  function applySwatch(hex) {
+    quickColor = hex;
+    var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    setChannel(channelOf('red'), r);
+    setChannel(channelOf('green'), g);
+    setChannel(channelOf('blue'), b);
+    // Белый канал даёт белый чище смеси RGB, но на цветном свотче он бы «размыл» цвет.
+    var w = channelOf('white');
+    if (w !== null) setChannel(w, (r === 255 && g === 255 && b === 255) ? 255 : 0);
+    // Диммер поднимаем, если он в нуле: иначе цвет выбран, а прибор тёмный.
+    var d = channelOf('dimmer');
+    if (d !== null && !chValues[d]) setChannel(d, 255);
+    feedback();
+    renderQuick();
+    renderFaders();
+  }
+
+  function renderQuick() {
+    var box = $('quick');
+    box.textContent = '';
+    if (!openFx) return;
+    var hasColor = channelOf('red') !== null && channelOf('green') !== null && channelOf('blue') !== null;
+    var panIdx = channelOf('pan'), tiltIdx = channelOf('tilt');
+
+    if (hasColor) {
+      var cb = document.createElement('div');
+      cb.className = 'qblock';
+      var ct = document.createElement('div'); ct.className = 'qtitle'; ct.textContent = T('qColor');
+      var sws = document.createElement('div'); sws.className = 'swatches';
+      SWATCHES.forEach(function (hex) {
+        var b = document.createElement('button');
+        b.className = 'sw' + (quickColor === hex ? ' on' : '');
+        b.style.background = hex;
+        b.setAttribute('aria-label', hex);
+        b.addEventListener('click', function () { applySwatch(hex); });
+        sws.appendChild(b);
+      });
+      cb.appendChild(ct); cb.appendChild(sws); box.appendChild(cb);
+    }
+
+    if (panIdx !== null && tiltIdx !== null) {
+      var pb = document.createElement('div');
+      pb.className = 'qblock';
+      var pt = document.createElement('div'); pt.className = 'qtitle'; pt.textContent = T('qPos');
+      var pad = document.createElement('div'); pad.className = 'pad';
+      var v = document.createElement('i'); v.className = 'v';
+      var h = document.createElement('i'); h.className = 'h';
+      var dot = document.createElement('b');
+      var px = (chValues[panIdx] || 0) / 255, py = (chValues[tiltIdx] || 0) / 255;
+      dot.style.left = (px * 100) + '%';
+      dot.style.top = ((1 - py) * 100) + '%';
+      function move(e) {
+        var rect = pad.getBoundingClientRect();
+        var t = e.touches ? e.touches[0] : e;
+        var x = Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width));
+        var y = Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height));
+        dot.style.left = (x * 100) + '%';
+        dot.style.top = (y * 100) + '%';
+        setChannel(panIdx, Math.round(x * 255));
+        setChannel(tiltIdx, Math.round((1 - y) * 255));
+      }
+      pad.addEventListener('pointerdown', function (e) { pad.setPointerCapture(e.pointerId); move(e); });
+      pad.addEventListener('pointermove', function (e) { if (e.buttons || e.pressure) move(e); });
+      pad.appendChild(v); pad.appendChild(h); pad.appendChild(dot);
+      pb.appendChild(pt); pb.appendChild(pad); box.appendChild(pb);
+    }
+  }
+
+  function renderFaders() {
+    var box = $('faders');
+    box.textContent = '';
+    var f = openFx;
+    if (!f) return;
+    $('noChannels').textContent = f.channels.length ? '' : T('noChannels');
+    $('noChannels').classList.toggle('hidden', f.channels.length > 0);
+    $('btnHl').classList.toggle('on', highlightId === f.id);
+
+    f.channels.forEach(function (ch) {
+      var cell = document.createElement('div');
+      cell.className = 'fader';
+      cell.style.setProperty('--ch', CH_COLORS[ch.type] || '#6366f1');
+
+      var val = document.createElement('div');
+      val.className = 'val';
+      val.textContent = chValues[ch.idx] === undefined ? '—' : chValues[ch.idx];
+
+      var input = document.createElement('input');
+      input.type = 'range';
+      input.min = '0'; input.max = '255'; input.step = '1';
+      input.value = String(chValues[ch.idx] || 0);
+      input.style.setProperty('--fill', ((chValues[ch.idx] || 0) / 255 * 100) + '%');
+
+      var name = document.createElement('div');
+      name.className = 'nm';
+      name.textContent = ch.name;
+      var dmx = document.createElement('div');
+      dmx.className = 'dmx';
+      // Абсолютный DMX-адрес канала — по нему техник сверяется с пультом прибора.
+      dmx.textContent = '#' + (f.address + ch.idx);
+
+      input.addEventListener('input', function () {
+        var v = parseInt(this.value, 10) || 0;
+        chValues[ch.idx] = v;
+        val.textContent = v;
+        this.style.setProperty('--fill', (v / 255 * 100) + '%');
+        cell.classList.add('held');
+        queueChannel(f.id, ch.idx, v);
+      });
+
+      cell.appendChild(val); cell.appendChild(input);
+      cell.appendChild(name); cell.appendChild(dmx);
+      box.appendChild(cell);
+    });
+  }
+
+  // Отправка не чаще 30 раз в секунду: палец по фейдеру рождает сотни событий, а
+  // на проводе всё равно живёт последнее значение (last-write-wins).
+  var pending = null, sendTimer = null;
+  function queueChannel(fx, idx, val) {
+    pending = pending || {};
+    pending[fx + '|' + idx] = { fx: fx, idx: idx, val: val };
+    if (sendTimer) return;
+    sendTimer = setTimeout(function () {
+      sendTimer = null;
+      var batch = pending; pending = null;
+      for (var k in batch) send({ type: 'ch.set', fx: batch[k].fx, idx: batch[k].idx, val: batch[k].val });
+    }, 33);
+  }
+
+  // ── Адресный тест ──
+  // Прибор для него не нужен вовсе: значение уходит по «юниверс + адрес» тем же
+  // слоем и тем же проходом в буфер, что и фейдеры каналов, — значит и Blackout
+  // с мастером гасят его одинаково.
+  var addrU = 1, addrA = 1, addrV = 0;
+
+  function renderAddr() {
+    $('uniVal').textContent = addrU;
+    $('adrVal').textContent = addrA;
+    $('addrValue').textContent = addrV;
+    $('addrFader').value = String(addrV);
+    $('btnBlackout3').classList.toggle('on', blackoutOn);
+  }
+
+  function sendAddr() {
+    send({ type: 'addr.set', universe: addrU, addr: addrA, val: addrV });
+  }
+
+  // Шаг по адресу гасит предыдущий: иначе при обходе цепочки за спиной остаётся
+  // цепочка зажжённых каналов и непонятно, который отвечает.
+  function stepAddr(delta) {
+    var next = addrA + delta;
+    if (next < 1 || next > 512) return;
+    if (addrV > 0) send({ type: 'addr.set', universe: addrU, addr: addrA, val: 0 });
+    addrA = next;
+    renderAddr();
+    if (addrV > 0) sendAddr();
+    feedback();
+  }
+
+  function toggleHighlight(id) {
+    // Светится ОДИН прибор: иначе в зале непонятно, который ответил на нажатие.
+    var on = highlightId !== id;
+    highlightId = on ? id : null;
+    send({ type: 'hl', fx: id, on: on });
+    feedback();
+    if (openFx) { $('btnHl').classList.toggle('on', highlightId === openFx.id); }
+    else renderList();
+  }
+  function show(id) {
+    ['screenConnecting', 'screenOnline', 'screenFixture', 'screenAddr', 'screenPin', 'screenOffline', 'screenShow'].forEach(function (s) {
+      $(s).classList.toggle('hidden', s !== id);
+    });
+  }
+  function applyLang() {
+    // Экран «Шоу» (раскладки пульта). Узлы существуют всегда, поэтому подписи ставим
+    // здесь же, рядом с остальными — язык приходит от программы в welcome.
+    var showLabels = [
+      ['btnToShowLabel', 'show'], ['btnToFixturesLabel', 'toFixtures'], ['btnLockLabel', 'lock'],
+      ['btnBlackoutShowLabel', 'blackout'], ['lockTitle', 'lockTitle'], ['lockText', 'lockText'],
+      ['btnUnlockLabel', 'unlock']
+    ];
+    for (var si = 0; si < showLabels.length; si++) {
+      var node = $(showLabels[si][0]);
+      if (node) node.textContent = T(showLabels[si][1]);
+    }
+    if (typeof renderShow === 'function') renderShow();
+    document.documentElement.lang = lang;
+    // Название программы кириллицей только на русском, латиницей на остальных языках
+    // (правило бренда проекта); ниже — приписка с названием функции.
+    $('brand').textContent = lang === 'ru' ? 'СветоМастер' : 'SvetoMaster';
+    $('brandSub').textContent = T('brand');
+    $('cTitle').textContent = T('cTitle'); $('cText').textContent = T('cText');
+    $('search').placeholder = T('search');
+    $('btnReleaseLabel').textContent = T('release');
+    $('btnBlackoutLabel').textContent = T('blackout');
+    $('btnAddrTestLabel').textContent = T('addrTest');
+    $('addrTitle').textContent = T('addrTitle');
+    $('addrUniLabel').textContent = T('uni');
+    $('addrAdrLabel').textContent = T('adr');
+    $('addrValLabel').textContent = T('valLb');
+    $('prevLabel').textContent = T('prevA');
+    $('nextLabel').textContent = T('nextA');
+    $('addrReleaseLabel').textContent = T('reset');
+    $('btnBlackout3Label').textContent = T('blackout');
+    $('addrHint').textContent = T('addrHint');
+    // Пожелания по развитию — только в русской версии (форум русскоязычный).
+    var note = $('forumNote');
+    note.textContent = '';
+    note.classList.toggle('hidden', lang !== 'ru');
+    if (lang === 'ru') {
+      note.appendChild(document.createTextNode('Принимаем пожелания по развитию смарт-пульта на '));
+      var a = document.createElement('a');
+      a.href = 'https://udmx.net/soft/forums/forum/%d1%80%d0%b0%d0%b1%d0%be%d1%82%d0%b0-%d0%b2-%d0%bf%d1%80%d0%be%d0%b3%d1%80%d0%b0%d0%bc%d0%bc%d0%b5/';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = 'нашем форуме';
+      note.appendChild(a);
+      note.appendChild(document.createTextNode('.'));
+    }
+    renderList();
+    $('pTitle').textContent = T('pTitle'); $('pText').textContent = T('pText'); $('pinBtn').textContent = T('pBtn');
+    $('fTitle').textContent = T('fTitle'); $('fText').textContent = T('fText');
+    $('fHint1').textContent = T('f1'); $('fHint2').textContent = T('f2'); $('fHint3').textContent = T('f3');
+    $('fHint4').textContent = T('f4'); $('retryBtn').textContent = T('retry');
+    document.title = T('brand');
+  }
+  function setStatus(kind, text) {
+    var dot = $('dot');
+    dot.className = 'dot ' + (kind || '');
+    $('statusText').textContent = text;
+  }
+
+  // ── Идентификация устройства ──
+  // deviceId переживает перезагрузку страницы: на ПК видно ОДНО устройство, а не новое
+  // на каждый разрыв Wi-Fi. Токен, наоборот, живёт только текущую вкладку (sessionStorage).
+  var deviceId = safeGet('local', 'sm-device-id');
+  if (!deviceId) {
+    deviceId = 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    safeSet('local', 'sm-device-id', deviceId);
+  }
+  function safeGet(store, key) {
+    try { return (store === 'local' ? localStorage : sessionStorage).getItem(key); } catch (e) { return null; }
+  }
+  function safeSet(store, key, val) {
+    try { (store === 'local' ? localStorage : sessionStorage).setItem(key, val); } catch (e) { /* приватный режим */ }
+  }
+
+  function deviceName() {
+    var ua = navigator.userAgent || '';
+    var os = /Android/i.test(ua) ? 'Android'
+      : /iPhone|iPad|iPod/i.test(ua) ? 'iPhone/iPad'
+      : /Windows/i.test(ua) ? 'Windows'
+      : /Mac OS/i.test(ua) ? 'Mac' : 'Phone';
+    var br = /CriOS|Chrome/i.test(ua) ? 'Chrome'
+      : /FxiOS|Firefox/i.test(ua) ? 'Firefox'
+      : /Safari/i.test(ua) ? 'Safari' : '';
+    return br ? os + ' · ' + br : os;
+  }
+
+  // Токен из QR приходит в hash (#t=...): он не попадает ни в логи сервера, ни в
+  // Referer. Сразу переносим его в sessionStorage и чистим адресную строку.
+  var token = '';
+  var m = /[#&]t=([0-9a-f]{8,64})/i.exec(location.hash || '');
+  if (m) {
+    token = m[1];
+    safeSet('session', 'sm-token', token);
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  } else {
+    token = safeGet('session', 'sm-token') || '';
+  }
+  var pin = '';
+
+  // ── Соединение ──
+  var ws = null, pingTimer = null, reconnectTimer = null, attempts = 0, manualStop = false;
+
+  function wsUrl() {
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  }
+
+  function connect() {
+    clearTimeout(reconnectTimer);
+    if (!token && !pin) { show('screenPin'); setStatus('warn', T('offline')); return; }
+    manualStop = false;
+    show('screenConnecting');
+    setStatus('warn', T('connecting'));
+    try {
+      ws = new WebSocket(wsUrl());
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+    ws.onopen = function () {
+      attempts = 0;
+      send({ type: 'hello', token: token, pin: pin, deviceId: deviceId, deviceName: deviceName() });
+      clearInterval(pingTimer);
+      // Раз в секунду: сервер по молчанию 8 с считает телефон ушедшим и сбрасывает
+      // свой слой света — это защита от «канал завис на 100%».
+      pingTimer = setInterval(function () { send({ type: 'ping', t: Date.now() }); }, 1000);
+    };
+    ws.onmessage = function (ev) {
+      var msg = null;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (!msg || msg.v !== 1) return;
+      handle(msg);
+    };
+    ws.onclose = function () {
+      clearInterval(pingTimer);
+      if (manualStop) return;
+      scheduleReconnect();
+    };
+    ws.onerror = function () { /* onclose придёт следом */ };
+  }
+
+  function handle(msg) {
+    if (msg.type === 'welcome') {
+      if (msg.lang) { lang = pickLang(msg.lang); applyLang(); }
+      pin = '';                       // дальше переподключаемся по токену
+      if (msg.via === 'pin') { token = safeGet('session', 'sm-token') || token; }
+      if (msg.snapshot) snapshot = normalizeSnapshot(msg.snapshot);
+      // Переподключились после обрыва — программа уже сбросила слой пульта,
+      // поэтому и здесь не оставляем «подсвеченным» то, что давно погасло.
+      highlightId = null;
+      show('screenOnline');
+      setStatus('on', (msg.projectName || T('connected')));
+      renderList();
+      return;
+    }
+    if (msg.type === 'context') {
+      if (msg.lang) { lang = pickLang(msg.lang); applyLang(); }
+      if (msg.projectName) setStatus('on', msg.projectName);
+      return;
+    }
+    if (msg.type === 'ws.list') { onWorkspaces(msg.items); return; }
+    if (msg.type === 'ws.state') { onShowState(msg); return; }
+    if (msg.type === 'snapshot') {
+      // Патч правили на ПК — список обновляется сам, переподключаться не нужно.
+      snapshot = normalizeSnapshot(msg);
+      renderList();
+      return;
+    }
+    if (msg.type === 'state') {
+      blackoutOn = !!msg.blackout;
+      highlightId = msg.hl || null;
+      // Blackout могли нажать и на ПК — обе кнопки на телефоне должны это показать.
+      $('btnBlackout').classList.toggle('on', blackoutOn);
+      $('btnBlackout2').classList.toggle('on', blackoutOn);
+      $('btnBlackoutShow').classList.toggle('on', blackoutOn);
+      if (openFx) $('btnHl').classList.toggle('on', highlightId === openFx.id);
+      else renderList();
+      return;
+    }
+    if (msg.type === 'denied') {
+      manualStop = true;
+      try { ws.close(); } catch (e) {}
+      token = '';
+      show('screenPin');
+      setStatus('off', T('offline'));
+      $('pinErr').textContent = msg.reason === 'blocked' ? T('pErrBlocked') : T('pErrBad');
+      return;
+    }
+    if (msg.type === 'bye') {
+      manualStop = true;
+      show('screenOffline');
+      setStatus('off', T('offline'));
+      $('fTitle').textContent = msg.reason === 'replaced' ? T('replaced')
+        : msg.reason === 'kicked' ? T('kicked') : T('stopped');
+      return;
+    }
+    // pong и будущие типы (snapshot/state) — шаги 2-3.
+  }
+
+  /** Снимок из сети — данные чужие: берём только известные поля нужных типов. */
+  function normalizeSnapshot(raw) {
+    var fixtures = Array.isArray(raw && raw.fixtures) ? raw.fixtures : [];
+    var out = [];
+    for (var i = 0; i < fixtures.length; i++) {
+      var f = fixtures[i];
+      if (!f || typeof f.id !== 'string') continue;
+      out.push({
+        id: f.id,
+        name: String(f.name || ''),
+        type: String(f.type || 'other'),
+        universe: Number(f.universe) || 1,
+        address: Number(f.address) || 0,
+        channels: Array.isArray(f.channels) ? f.channels : [],
+      });
+    }
+    var types = Array.isArray(raw && raw.types) ? raw.types.filter(function (t) { return typeof t === 'string'; }) : [];
+    return { fixtures: out, types: types };
+  }
+
+  function send(obj) {
+    if (!ws || ws.readyState !== 1) return;
+    obj.v = 1;
+    try { ws.send(JSON.stringify(obj)); } catch (e) {}
+  }
+
+  function scheduleReconnect() {
+    attempts++;
+    // Первые попытки частые (моргнул Wi-Fi), дальше реже — телефон в кармане не
+    // должен греться, штурмуя мёртвый адрес.
+    var delay = attempts < 5 ? 1000 : attempts < 15 ? 3000 : 8000;
+    if (attempts >= 3) { show('screenOffline'); setStatus('off', T('offline')); }
+    reconnectTimer = setTimeout(connect, delay);
+  }
+
+  $('pinBtn').addEventListener('click', function () {
+    var val = ($('pinInput').value || '').replace(/\D/g, '').slice(0, 4);
+    if (val.length !== 4) { $('pinErr').textContent = T('pErrBad'); return; }
+    pin = val;
+    $('pinErr').textContent = '';
+    attempts = 0;
+    connect();
+  });
+
+  // ── Экран «Шоу»: раскладки пульта (PRO, ТЗ docs/TZ_REMOTE_WORKSPACES.md) ──
+  //
+  // Keep this block at the top level of the IIFE: handle() calls onWorkspaces/onShowState
+  // by name. In 1.9.0–1.9.2 it sat inside the PIN button handler, so ws.list threw a
+  // ReferenceError and the "Show" button never appeared. Guarded by remotePage.test.ts.
+  //
+  // ЧТО ЗДЕСЬ ВАЖНО. Кнопка на телефоне — это НЕ свой механизм света: нажатие уходит
+  // в программу и там дёргает ту же кнопку, что и на компьютере. Поэтому экран ничего
+  // не «держит» сам и при обрыве связи запущенное продолжает играть: гасить свет из-за
+  // пропавшего Wi-Fi опаснее, чем оставить его как есть.
+  var workspaces = [];
+  var wsActive = '';
+  var showState = null;
+  var locked = false;
+  var wakeLock = null;
+  var holdTimer = null;
+  var faderTouch = {};   // индекс → до какого времени игнорировать эхо от программы
+
+  function onWorkspaces(items) {
+    workspaces = [];
+    if (Object.prototype.toString.call(items) === '[object Array]') {
+      for (var i = 0; i < items.length; i++) {
+        var w = items[i];
+        if (!w || typeof w !== 'object') continue;
+        var grid = w.grid && typeof w.grid === 'object' ? w.grid : {};
+        var cols = Math.max(1, Math.min(4, Number(grid.cols) || 3));
+        var rows = Math.max(1, Math.min(8, Number(grid.rows) || 5));
+        workspaces.push({
+          id: String(w.id || ''), name: String(w.name || ''),
+          cols: cols, rows: rows,
+          cells: Object.prototype.toString.call(w.cells) === '[object Array]' ? w.cells : [],
+          faders: Object.prototype.toString.call(w.faders) === '[object Array]' ? w.faders : []
+        });
+      }
+    }
+    // Раскладок нет (или нет PRO) — вкладка «Шоу» не показывается вовсе.
+    $('btnToShow').classList.toggle('hidden', workspaces.length === 0);
+    if (!findWs(wsActive)) wsActive = workspaces.length ? workspaces[0].id : '';
+    if (!workspaces.length && !$('screenShow').classList.contains('hidden')) show('screenOnline');
+    renderShow();
+  }
+
+  function findWs(id) {
+    for (var i = 0; i < workspaces.length; i++) if (workspaces[i].id === id) return workspaces[i];
+    return null;
+  }
+
+  function onShowState(msg) {
+    showState = msg && typeof msg === 'object' ? msg : null;
+    renderNow();
+    renderTiles();
+    renderFaderValues();
+  }
+
+  function tileText(cell) {
+    if (cell.label) return String(cell.label);
+    if (cell.name) return String(cell.name);
+    if (cell.type === 'action') return T('act_' + cell.actionId) || String(cell.actionId);
+    return '';
+  }
+
+  function tileActive(cell) {
+    if (!showState || !showState.active) return false;
+    var a = showState.active;
+    if (cell.type === 'scene') return a.sceneId === cell.targetId;
+    if (cell.type === 'chase') return a.chaseId === cell.targetId;
+    if (cell.type === 'playlist') return a.playlistId === cell.targetId;
+    if (cell.type === 'hyperlist') return a.hyperlistId === cell.targetId;
+    if (cell.type === 'action' && cell.actionId === 'blackout') return !!showState.blackout;
+    return false;
+  }
+
+  /** Флэш: сцена играет, только пока палец на кнопке (нажатие — сразу, без задержки). */
+  function isFlashCell(cell) {
+    return cell.type === 'scene' && cell.flash === true;
+  }
+
+  /** Опасные плитки жмутся УДЕРЖАНИЕМ: карман и случайное касание не должны гасить шоу. */
+  function isHoldCell(cell) {
+    return cell.type === 'action' && (cell.actionId === 'blackout' || cell.actionId === 'stopAll');
+  }
+
+  function renderShow() {
+    renderBar();
+    renderTiles();
+    renderShowFaders();
+    var ws = findWs(wsActive);
+    $('wsEmpty').classList.toggle('hidden', !!ws);
+    if (!ws) $('wsEmpty').textContent = T('wsNone');
+  }
+
+  function renderBar() {
+    var bar = $('wsBar');
+    bar.innerHTML = '';
+    for (var i = 0; i < workspaces.length; i++) {
+      (function (w) {
+        var b = document.createElement('button');
+        b.className = 'wschip' + (w.id === wsActive ? ' on' : '');
+        b.textContent = w.name || T('wsUnnamed');
+        b.addEventListener('click', function () {
+          wsActive = w.id;
+          send({ type: 'ws.pick', id: w.id });
+          renderShow();
+        });
+        bar.appendChild(b);
+      })(workspaces[i]);
+    }
+    bar.classList.toggle('hidden', workspaces.length < 2);
+  }
+
+  function renderNow() {
+    var box = $('nowBar');
+    if (!showState || !showState.now) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    $('nowLabel').textContent = T('nowLb') + (showState.now.total ? ' · ' + showState.now.step + '/' + showState.now.total : '');
+    $('nowName').textContent = showState.now.name || '';
+    $('nextName').textContent = showState.next && showState.next.name ? T('nextLb') + ': ' + showState.next.name : '';
+  }
+
+  function renderTiles() {
+    var ws = findWs(wsActive);
+    var grid = $('wsGrid');
+    if (!ws) { grid.innerHTML = ''; return; }
+    grid.style.gridTemplateColumns = 'repeat(' + ws.cols + ', minmax(0, 1fr))';
+    var total = ws.cols * ws.rows;
+    // Полная перерисовка только когда изменился состав; иначе обновляем классы,
+    // чтобы нажатие не «проваливалось» из-за пересоздания узла под пальцем.
+    if (grid.childNodes.length !== total || grid.getAttribute('data-ws') !== ws.id) {
+      grid.innerHTML = '';
+      grid.setAttribute('data-ws', ws.id);
+      for (var i = 0; i < total; i++) grid.appendChild(makeTile(ws, i));
+    } else {
+      for (var j = 0; j < total; j++) updateTile(grid.childNodes[j], ws, j);
+    }
+  }
+
+  function makeTile(ws, index) {
+    var el = document.createElement('button');
+    el.className = 'tile';
+    bindTile(el, index);
+    updateTile(el, ws, index);
+    return el;
+  }
+
+  function updateTile(el, ws, index) {
+    var cell = ws.cells[index] || { type: 'empty' };
+    el.textContent = tileText(cell);
+    el.className = 'tile'
+      + (cell.type === 'empty' ? ' empty' : '')
+      + (tileActive(cell) ? ' on' : '')
+      + (isHoldCell(cell) ? ' hold' : '')
+      + (isFlashCell(cell) ? ' flash' : '');
+    el.style.background = cell.color ? hexToSoft(cell.color) : '';
+    el.style.borderColor = cell.color ? cell.color : '';
+    el.setAttribute('data-index', String(index));
+  }
+
+  /** Цвет подложки приглушаем: сплошная заливка ослепляет в темноте. */
+  function hexToSoft(hex) {
+    var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex));
+    if (!m) return '';
+    return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',0.22)';
+  }
+
+  function bindTile(el, index) {
+    var pressed = false;
+    var fired = false;
+
+    function begin(e) {
+      var ws = findWs(wsActive);
+      var cell = ws && ws.cells[index];
+      if (!cell || cell.type === 'empty' || locked) return;
+      pressed = true; fired = false;
+      if (isFlashCell(cell)) {
+        // Свет обязан появиться в момент касания: у флэша ценность именно в том, что
+        // он совпадает с ударом, акцентом, репликой. Ждать отпускания здесь нельзя.
+        fired = true;
+        fire(index);
+      }
+      if (isHoldCell(cell)) {
+        el.classList.add('holding');
+        holdTimer = setTimeout(function () {
+          if (!pressed) return;
+          fired = true;
+          fire(index);
+          el.classList.remove('holding');
+        }, 400);
+      }
+      if (e && e.preventDefault) e.preventDefault();
+    }
+
+    function end() {
+      var ws = findWs(wsActive);
+      var cell = ws && ws.cells[index];
+      el.classList.remove('holding');
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+      if (!pressed) return;
+      pressed = false;
+      if (!cell || cell.type === 'empty' || locked) return;
+      if (!isHoldCell(cell) && !fired) fire(index);
+      // Отпускание шлём всегда: обработчик появится с flash-кнопками, но телефон уже
+      // обязан сообщать о нём — иначе зажатая кнопка «зависла» бы на будущей версии.
+      send({ type: 'cell.release', ws: wsActive, index: index });
+    }
+
+    function cancel() {
+      pressed = false;
+      el.classList.remove('holding');
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    }
+
+    el.addEventListener('touchstart', begin, { passive: false });
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', cancel);
+    el.addEventListener('mousedown', begin);
+    el.addEventListener('mouseup', end);
+    el.addEventListener('mouseleave', cancel);
+  }
+
+  function fire(index) {
+    send({ type: 'cell.press', ws: wsActive, index: index });
+    feedback();
+  }
+
+  // Not "renderFaders": that name belongs to the fixture card (channel faders), and a
+  // second top-level declaration would silently replace it.
+  function renderShowFaders() {
+    var ws = findWs(wsActive);
+    var box = $('wsFaders');
+    box.innerHTML = '';
+    var list = ws ? ws.faders : [];
+    box.classList.toggle('hidden', !list.length);
+    for (var i = 0; i < list.length; i++) {
+      (function (fader, index) {
+        if (!fader || fader.type === 'unassigned') return;
+        var wrap = document.createElement('div');
+        wrap.className = 'wsfader';
+        var input = document.createElement('input');
+        input.type = 'range'; input.min = 0; input.max = 255; input.step = 1;
+        input.className = 'fader-slider';
+        input.setAttribute('data-fader', String(index));
+        input.value = faderValue(fader);
+        input.addEventListener('input', function () {
+          faderTouch[index] = Date.now() + 300;
+          send({ type: 'fader.set', ws: wsActive, index: index, val: Number(input.value) });
+        });
+        var cap = document.createElement('div');
+        cap.className = 'cap';
+        cap.textContent = fader.type === 'master' ? T('fMaster') : (fader.label || T('fLive') + ' ' + (fader.index + 1));
+        wrap.appendChild(input); wrap.appendChild(cap);
+        box.appendChild(wrap);
+      })(list[i], i);
+    }
+  }
+
+  function faderValue(fader) {
+    if (!showState) return 0;
+    if (fader.type === 'master') return Math.round((Number(showState.master) || 0) * 255 / 100);
+    var arr = showState.faders;
+    return Object.prototype.toString.call(arr) === '[object Array]' ? (Number(arr[fader.index]) || 0) : 0;
+  }
+
+  /** Возврат значений от программы: под пальцем фейдер не дёргаем (эхо-подавление). */
+  function renderFaderValues() {
+    var ws = findWs(wsActive);
+    if (!ws) return;
+    var inputs = $('wsFaders').querySelectorAll('input[data-fader]');
+    for (var i = 0; i < inputs.length; i++) {
+      var index = Number(inputs[i].getAttribute('data-fader'));
+      if (faderTouch[index] && faderTouch[index] > Date.now()) continue;
+      var fader = ws.faders[index];
+      if (fader) inputs[i].value = faderValue(fader);
+    }
+  }
+
+  // Экран не должен гаснуть посреди шоу: искать телефон в темноте и будить его,
+  // когда нужно нажать кнопку, — худшее, что может случиться на площадке.
+  function requestWake() {
+    try {
+      if (!navigator.wakeLock || wakeLock) return;
+      navigator.wakeLock.request('screen').then(function (lock) {
+        wakeLock = lock;
+        lock.addEventListener('release', function () { wakeLock = null; });
+      }).catch(function () {});
+    } catch (e) { /* старый браузер — просто живём без этого */ }
+  }
+
+  function releaseWake() {
+    try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {}
+  }
+
+  function openShow() {
+    show('screenShow');
+    if (wsActive) send({ type: 'ws.pick', id: wsActive });
+    renderShow();
+    requestWake();
+  }
+
+  $('btnToShow').addEventListener('click', openShow);
+  $('btnToFixtures').addEventListener('click', function () { releaseWake(); show('screenOnline'); renderList(); });
+  $('btnBlackoutShow').addEventListener('click', function () { if (!locked) { send({ type: 'blackout' }); feedback(); } });
+
+  // Замок от кармана и случайных касаний. Снимается удержанием: одиночный тап по
+  // «Разблокировать» защиту не отменял бы.
+  $('btnLock').addEventListener('click', function () { locked = true; $('wsLock').classList.remove('hidden'); });
+  (function () {
+    var timer = null;
+    var btn = $('btnUnlock');
+    function begin(e) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () {
+        locked = false;
+        $('wsLock').classList.add('hidden');
+        feedback();
+      }, 1000);
+      if (e && e.preventDefault) e.preventDefault();
+    }
+    function end() { if (timer) { clearTimeout(timer); timer = null; } }
+    btn.addEventListener('touchstart', begin, { passive: false });
+    btn.addEventListener('touchend', end);
+    btn.addEventListener('mousedown', begin);
+    btn.addEventListener('mouseup', end);
+    btn.addEventListener('mouseleave', end);
+  })();
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && !$('screenShow').classList.contains('hidden')) requestWake();
+  });
+
+  $('pinInput').addEventListener('input', function () { $('pinErr').textContent = ''; });
+  $('retryBtn').addEventListener('click', function () { attempts = 0; connect(); });
+
+  $('search').addEventListener('input', function () { query = this.value || ''; renderList(); });
+  $('btnRelease').addEventListener('click', function () {
+    send({ type: 'releaseAll' });
+    highlightId = null;
+    feedback();
+    renderList();
+  });
+  function toggleBlackout() {
+    // Тот же blackout, что и кнопка на ПК: состояние вернётся сообщением state.
+    send({ type: 'blackout' });
+    feedback();
+  }
+  $('btnBlackout').addEventListener('click', toggleBlackout);
+  $('btnBlackout2').addEventListener('click', toggleBlackout);
+
+  $('addrBack').addEventListener('click', function () { show('screenOnline'); renderList(); });
+  $('uniMinus').addEventListener('click', function () { if (addrU > 1) { addrU--; renderAddr(); } });
+  $('uniPlus').addEventListener('click', function () { if (addrU < 64) { addrU++; renderAddr(); } });
+  $('adrMinus').addEventListener('click', function () { stepAddr(-1); });
+  $('adrPlus').addEventListener('click', function () { stepAddr(1); });
+  $('prevAddr').addEventListener('click', function () { stepAddr(-1); });
+  $('nextAddr').addEventListener('click', function () { stepAddr(1); });
+  $('addrFader').addEventListener('input', function () {
+    addrV = parseInt(this.value, 10) || 0;
+    $('addrValue').textContent = addrV;
+    sendAddr();
+  });
+  $('p0').addEventListener('click', function () { addrV = 0; renderAddr(); sendAddr(); feedback(); });
+  $('p50').addEventListener('click', function () { addrV = 128; renderAddr(); sendAddr(); feedback(); });
+  $('p100').addEventListener('click', function () { addrV = 255; renderAddr(); sendAddr(); feedback(); });
+  $('addrRelease').addEventListener('click', function () {
+    addrV = 0; renderAddr();
+    send({ type: 'addr.release' });
+    feedback();
+  });
+  $('btnBlackout3').addEventListener('click', toggleBlackout);
+  $('btnAddrTest').addEventListener('click', function () { renderAddr(); show('screenAddr'); });
+
+  $('btnBack').addEventListener('click', function () {
+    openFx = null;
+    show('screenOnline');
+    renderList();
+  });
+  $('btnHl').addEventListener('click', function () {
+    if (openFx) toggleHighlight(openFx.id);
+  });
+  $('btnReleaseOne').addEventListener('click', function () {
+    if (!openFx) return;
+    send({ type: 'release', fx: openFx.id });
+    chValues = {};
+    if (highlightId === openFx.id) highlightId = null;
+    feedback();
+    renderFaders();
+  });
+
+  // Вернулись в приложение / экран проснулся → сразу пробуем связь, не ждём таймер.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && (!ws || ws.readyState > 1)) { attempts = 0; connect(); }
+  });
+
+  applyLang();
+  connect();
+})();
+</script>
+</body>
+</html>
