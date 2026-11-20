@@ -1,0 +1,14 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- SvetoMaster logo — variant A «Искра» (chosen 2026-06-11).
+       Brand gradient indigo→purple + white four-ray spark with a small companion spark.
+       Small sizes (32/16) are rendered without the companion spark — see scripts/generate-logo.mjs. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <path d="M118 42 C 128 96 150 118 204 128 C 150 138 128 160 118 214 C 108 160 86 138 32 128 C 86 118 108 96 118 42 Z" fill="#fff"/>
+  <path d="M192 156 C 196 176 204 184 224 188 C 204 192 196 200 192 220 C 188 200 180 192 160 188 C 180 184 188 176 192 156 Z" fill="#fff" opacity="0.92"/>
+</svg>
